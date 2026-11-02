@@ -16,10 +16,16 @@ on:
         type: choice
         options: [arm64, universal]
         default: arm64
+      cpu:
+        description: "Optimize for one Apple Silicon CPU (needs arm64). The app then runs only on that CPU and newer ones."
+        type: choice
+        options: [none, apple-m1]
+        default: none
   push:
     paths:
       - "other/deps/**"
       - "other/build_deps.sh"
+      - "other/build_m1.sh"
       - "other/sync_xcode_dylibs.py"
       - ".github/workflows/build-gpu-next.yml"
 
@@ -33,6 +39,7 @@ jobs:
     timeout-minutes: 360
     env:
       ARCH: ${{ inputs.arch || 'arm64' }}
+      CPU: ${{ inputs.cpu || 'none' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -52,7 +59,9 @@ jobs:
           key: deps-sources-${{ hashFiles('other/deps/versions.env') }}
 
       - name: Build dependencies
-        run: ./other/build_deps.sh --arch "$ARCH"
+        run: |
+          if [[ "$CPU" != "none" ]]; then cpu_args=(--cpu "$CPU"); else cpu_args=(); fi
+          ./other/build_deps.sh --arch "$ARCH" ${cpu_args[@]+"${cpu_args[@]}"}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,8 +75,15 @@ jobs:
       - name: Build IINA
         run: |
           if [[ "$ARCH" == "universal" ]]; then archs="arm64 x86_64"; else archs="$ARCH"; fi
+          cpu_settings=()
+          if [[ "$CPU" != "none" ]]; then
+            # The same app settings as other/build_m1.sh.
+            cpu_settings=(GCC_OPTIMIZATION_LEVEL=3
+              "OTHER_CFLAGS=\$(inherited) -mcpu=$CPU"
+              "OTHER_SWIFT_FLAGS=\$(inherited) -target-cpu $CPU")
+          fi
           xcodebuild -project iina.xcodeproj -scheme iina -configuration Nightly \
-            -derivedDataPath . ONLY_ACTIVE_ARCH=NO ARCHS="$archs"
+            -derivedDataPath . ONLY_ACTIVE_ARCH=NO ARCHS="$archs" ${cpu_settings[@]+"${cpu_settings[@]}"}
 
       - name: Check the app bundle
         run: |
@@ -85,6 +101,6 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
-          name: IINA-gpu-next-${{ env.ARCH }}
+          name: IINA-gpu-next-${{ env.ARCH }}${{ env.CPU != 'none' && format('-{0}', env.CPU) || '' }}
           path: IINA.dmg
           archive: false
