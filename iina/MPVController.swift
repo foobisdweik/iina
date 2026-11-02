@@ -93,6 +93,10 @@ class MPVController: NSObject {
   var mpv: OpaquePointer!
   var mpvRenderContext: OpaquePointer?
 
+  /// The mpv render API in use, either `MPV_RENDER_API_TYPE_OPENGL_NEXT` (`gpu-next` renderer) or
+  /// `MPV_RENDER_API_TYPE_OPENGL` (legacy `gpu` renderer). This is `nil` until the renderer has been initialized.
+  private(set) var renderAPI: String?
+
   private var openGLContext: CGLContextObj! = nil
 
   /// [DispatchQueue](https://developer.apple.com/documentation/dispatch/dispatchqueue) for reading `mpv`
@@ -665,25 +669,55 @@ class MPVController: NSObject {
   ///
   /// This method creates and initializes the `mpv` renderer and sets the callback that `mpv` calls when a new video frame is available.
   ///
+  /// IINA prefers the `gpu-next` renderer (render API `MPV_RENDER_API_TYPE_OPENGL_NEXT`) when the
+  /// `useGpuNextRenderer` setting is enabled. The `gpu-next` renderer uses
+  /// [libplacebo](https://code.videolan.org/videolan/libplacebo) and is the renderer that mpv recommends. If the libmpv
+  /// in use does not provide that render API, or the renderer fails to initialize, then IINA falls back to the legacy
+  /// `gpu` renderer (render API `MPV_RENDER_API_TYPE_OPENGL`).
+  ///
   /// - Note: Advanced control must be enabled for the screenshot command to work when the window flag is used. See issue
   ///         [#4822](https://github.com/iina/iina/issues/4822) for details.
   func mpvInitRendering() {
     guard let mpv else {
       fatalError("mpvInitRendering() should be called after mpv handle being initialized!")
     }
-    let apiType = UnsafeMutableRawPointer(mutating: (MPV_RENDER_API_TYPE_OPENGL as NSString).utf8String)
     var openGLInitParams = mpv_opengl_init_params(get_proc_address: mpvGetOpenGLFunc,
                                                   get_proc_address_ctx: nil)
     withUnsafeMutablePointer(to: &openGLInitParams) { openGLInitParams in
       var advanced: CInt = 1
       withUnsafeMutablePointer(to: &advanced) { advanced in
-        var params = [
-          mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: apiType),
-          mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: openGLInitParams),
-          mpv_render_param(type: MPV_RENDER_PARAM_ADVANCED_CONTROL, data: advanced),
-          mpv_render_param()
-        ]
-        chkErr(mpv_render_context_create(&mpvRenderContext, mpv, &params))
+        /// Create the render context for the given render API and return the mpv status code.
+        func createRenderContext(_ api: String) -> Int32 {
+          // The API string must stay valid during the call, so use withCString instead of a bridged pointer.
+          return api.withCString { apiType in
+            var params = [
+              mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(mutating: apiType)),
+              mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: openGLInitParams),
+              mpv_render_param(type: MPV_RENDER_PARAM_ADVANCED_CONTROL, data: advanced),
+              mpv_render_param()
+            ]
+            return mpv_render_context_create(&self.mpvRenderContext, mpv, &params)
+          }
+        }
+        var api = MPV_RENDER_API_TYPE_OPENGL
+        var status: Int32
+        if Preference.bool(for: .useGpuNextRenderer) {
+          api = MPV_RENDER_API_TYPE_OPENGL_NEXT
+          status = createRenderContext(api)
+          if status < 0 {
+            log("""
+              Unable to use the gpu-next renderer (\(String(cString: mpv_error_string(status)))), \
+              falling back to the legacy gpu renderer
+              """, level: .warning)
+            api = MPV_RENDER_API_TYPE_OPENGL
+            status = createRenderContext(api)
+          }
+        } else {
+          status = createRenderContext(api)
+        }
+        chkErr(status)
+        renderAPI = api
+        log("Using mpv render API: \(api)")
       }
       openGLContext = CGLGetCurrentContext()
       mpv_render_context_set_update_callback(mpvRenderContext!, mpvUpdateCallback, mutableRawPointerOf(obj: player.mainWindow.videoView.videoLayer))

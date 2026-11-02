@@ -671,6 +671,8 @@
 "settings.toneMappingParamOverride.label" = "Параметр подстройки";
 "settings.toneMappingTargetPeak.desc" = "Измеренная пиковая яркость дисплея. По умолчанию IINA автоматически определяет нужное значение. Если автоопределение не удалось, яркость будет установлена на подходящее значение, основанное на характеристиках передачи дисплея. Включите этот параметр, если хотите вручную задать яркость дисплея.";
 "settings.toneMappingTargetPeak.label" = "Пиковая яркость";
+"settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
+"settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
 "settings.videoThreads.desc" = "По умолчанию: 0 (автоматически)";
 "settings.videoThreads.label" = "Количество потоков";
 

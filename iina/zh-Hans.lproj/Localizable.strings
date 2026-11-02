@@ -671,6 +671,8 @@
 "settings.toneMappingParamOverride.label" = "调整参数";
 "settings.toneMappingTargetPeak.desc" = "显示器的测量峰值亮度。默认情况下，IINA 会自动检测此值。如果检测失败，目标峰值将根据显示器的传输特性设置为一个合适的值。启用此设置可手动指定显示器的亮度。";
 "settings.toneMappingTargetPeak.label" = "目标峰值";
+"settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
+"settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
 "settings.videoThreads.desc" = "默认：0（自动）";
 "settings.videoThreads.label" = "线程数";
 
