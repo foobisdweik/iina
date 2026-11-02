@@ -40,7 +40,7 @@ You can get IINA through several sources. For the latest stable and beta release
 
 ## Building
 
-IINA uses mpv for media playback. To build IINA, you can either fetch copies of these libraries we have already built (using the instructions below) or build them yourself by skipping to [these instructions](#building-mpv-manually).
+IINA uses mpv for media playback. To build IINA, you can fetch copies of these libraries we have already built (using the instructions below), build them from source with support for the `gpu-next` renderer by skipping to [these instructions](#building-with-the-gpu-next-renderer), or build them yourself by skipping to [these instructions](#building-mpv-manually).
 
 ### Using the pre-compiled libraries
 
@@ -58,6 +58,32 @@ IINA uses mpv for media playback. To build IINA, you can either fetch copies of 
 2. Open iina.xcodeproj in the [latest public version of Xcode](https://apps.apple.com/app/xcode/id497799835). *IINA may not build if you use any other version.*
 
 3. Build the project.
+
+### Building with the gpu-next renderer
+
+IINA can render video with mpv's `gpu-next` renderer. This renderer uses [libplacebo](https://code.videolan.org/videolan/libplacebo), and it gives better HDR, tone mapping and color handling than the legacy `gpu` renderer. IINA uses libmpv's render API, and no mpv release has a `gpu-next` render API yet. So you must build libmpv from mpv master with the patch from [mpv-player/mpv#18607](https://github.com/mpv-player/mpv/pull/18607).
+
+`other/build_deps.sh` does this for you. It uses IINA's [official build scripts](https://github.com/iina/deps-buildscripts) to build all dependencies from source:
+
+1. Install the build tools:
+
+   ```console
+   brew install meson ninja cmake pkg-config autoconf automake libtool nasm
+   ```
+
+2. Build the dependencies. The first build takes one hour or more. Use `--arch arm64` or `--arch x86_64` to build for one architecture only, which is faster.
+
+   ```console
+   other/build_deps.sh
+   ```
+
+   The script installs the dylibs in `deps/lib` and the headers in `deps/include`. It then runs `other/sync_xcode_dylibs.py`, which changes the dylib names in `iina.xcodeproj` to match `deps/lib`. For example, libplacebo changes from `libplacebo.360.dylib` to `libplacebo.387.dylib`.
+
+3. Open `iina.xcodeproj` in Xcode and build the project.
+
+The pinned versions are in `other/deps/versions.env`, and the mpv patch is in `other/deps/patches/mpv/`. You can also run the "Build with gpu-next" GitHub Actions workflow, which builds the dependencies and IINA and uploads a DMG.
+
+The setting **Settings > Video > Use gpu-next renderer** is on by default. If libmpv has no `gpu-next` render API, for example when you use the pre-compiled libraries, IINA uses the legacy renderer. The log then shows `falling back to the legacy gpu renderer`. To go back to the pre-compiled libraries, run `other/download_libs.sh` again.
 
 ### Building mpv manually
 
