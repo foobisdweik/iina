@@ -1,0 +1,40 @@
+From dc5631790ff1824fc1834f559fd19800c53db889 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 2 Nov 2026 17:09:38 +0000
+Subject: [PATCH] mac/view: only use MetalLayer when building with Vulkan
+
+MetalLayer is defined in video/out/mac/metal_layer.swift, which meson
+only compiles when the cocoa, vulkan and swift features are all enabled.
+Since beddaec5a, view.swift refers to MetalLayer unconditionally, so a
+macOS build with -Dvulkan=disabled fails with:
+
+  view.swift:32:39: error: cannot find type 'MetalLayer' in scope
+
+Without Vulkan the layer can never be a MetalLayer, so keep the existing
+fallback (return true) and compile the MetalLayer check only when
+HAVE_VULKAN is defined.
+
+See mpv-player/mpv#18357.
+---
+ video/out/mac/view.swift | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/video/out/mac/view.swift b/video/out/mac/view.swift
+index f8cc6254a..e94a3e4c7 100644
+--- a/video/out/mac/view.swift
++++ b/video/out/mac/view.swift
+@@ -29,9 +29,11 @@ class View: NSView, CALayerDelegate {
+     override var acceptsFirstResponder: Bool { return true }
+ 
+     override var isOpaque: Bool {
++#if HAVE_VULKAN
+         if let metalLayer = layer as? MetalLayer {
+             return !metalLayer.isOpaque
+         }
++#endif
+ 
+         return true
+     }
+-- 
+2.43.0
+

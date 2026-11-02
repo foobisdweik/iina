@@ -5,8 +5,9 @@
 # This script uses IINA's official build scripts (iina/deps-buildscripts) at
 # the commit pinned in other/deps/versions.env, with these changes:
 #   * mpv is built from mpv master at a pinned commit, not from the v0.41.0
-#     release, and the patch in other/deps/patches/mpv/ adds the gpu-next
-#     OpenGL render API (MPV_RENDER_API_TYPE_OPENGL_NEXT).
+#     release. The patches in other/deps/patches/mpv/ add the gpu-next
+#     OpenGL render API (MPV_RENDER_API_TYPE_OPENGL_NEXT) and fix the macOS
+#     build without Vulkan.
 #   * libplacebo is updated, because mpv master needs a newer version.
 #   * The mpv patches of the build scripts are not applied, because all of
 #     them are already part of mpv master.
@@ -27,6 +28,7 @@ ARCH="universal"
 WORK_DIR="${ROOT_PATH}/deps/buildscripts"
 DOWNLOAD_EXTRAS=true
 DOWNLOAD_ARGS=()
+CPU=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -41,6 +43,8 @@ Usage: $0 [options]
     --arch <ARCH>        Architecture to build: universal | arm64 | x86_64 (default: universal)
     --work-dir <DIR>     Directory for the build scripts, sources and build files
                          (default: deps/buildscripts). Keep it to reuse downloaded sources.
+    --cpu <CPU>          Optimize for one Apple Silicon CPU, for example apple-m1. Needs
+                         --arch arm64. The dylibs then run only on that CPU and newer ones.
     --skip-downloads     Do not download yt-dlp and the official plugins
     --skip-plugins       Download yt-dlp, but not the official plugins
 
@@ -57,6 +61,8 @@ while [[ $# -gt 0 ]]; do
     --arch=*) ARCH="${1#*=}"; shift ;;
     --work-dir) [[ $# -ge 2 ]] || die "--work-dir needs a value"; WORK_DIR="$2"; shift 2 ;;
     --work-dir=*) WORK_DIR="${1#*=}"; shift ;;
+    --cpu) [[ $# -ge 2 ]] || die "--cpu needs a value"; CPU="$2"; shift 2 ;;
+    --cpu=*) CPU="${1#*=}"; shift ;;
     --skip-downloads) DOWNLOAD_EXTRAS=false; shift ;;
     --skip-plugins) DOWNLOAD_ARGS+=(--skip-plugins); shift ;;
     *) print_usage; die "unknown option: $1" ;;
@@ -68,6 +74,10 @@ case "$ARCH" in
   arm64 | x86_64) BUILD_ARCH="$ARCH" ;;
   *) die "invalid architecture: $ARCH (use universal, arm64 or x86_64)" ;;
 esac
+if [[ -n "$CPU" ]]; then
+  [[ "$CPU" =~ ^apple-m[0-9]+$ ]] || die "invalid CPU: $CPU (use an Apple Silicon CPU name, for example apple-m1)"
+  [[ "$ARCH" == "arm64" ]] || die "--cpu needs --arch arm64, because the result cannot run on Intel Macs"
+fi
 
 [[ "$(uname -s)" == "Darwin" ]] || die "the dependencies can only be built on macOS"
 missing=()
@@ -110,6 +120,45 @@ mkdir -p "${WORK_DIR}/patches/mpv"
 cp "${DEPS_OVERLAY}"/patches/mpv/*.patch "${WORK_DIR}/patches/mpv/"
 # build-mpv.sh reads MPV_REPO and MPV_COMMIT from versions.env through common.sh.
 export MPV_REPO MPV_COMMIT
+
+# 2b. Optional CPU tuning. Every library gets -mcpu=<CPU> (the instructions
+#     and the instruction scheduling of that CPU) and -O3. Each build system
+#     reads its flags from a different place:
+#       * meson (mpv, libplacebo, dav1d, libass, ...) reads the machine file,
+#         because meson_setup() clears CFLAGS.
+#       * cmake, autotools and FFmpeg (through --extra-cflags) read the CFLAGS
+#         that setup_arch_env() exports.
+#     -ffast-math and -Ofast are not used, because mpv and libplacebo depend on
+#     exact IEEE float behavior (for example, NaN means "default" for the
+#     tone-mapping-param option).
+if [[ -n "$CPU" ]]; then
+  log "Optimizing all dependencies for ${CPU} (-mcpu=${CPU} -O3)"
+  python3 - "${WORK_DIR}/extra/meson-darwin.ini.in" "$CPU" <<'EOF'
+import re, sys
+path, cpu = sys.argv[1], sys.argv[2]
+text = open(path).read()
+# Add the flags to the compile arguments only (c_args, cpp_args, objc_args,
+# objcpp_args), not to the *_link_args lines.
+pattern = re.compile(r"^((?:c|cpp|objc|objcpp)_args\s*=\s*\[.*)\]\s*$", re.M)
+text, count = pattern.subn(lambda m: m.group(1) + f", '-mcpu={cpu}', '-O3']", text)
+if count != 4:
+    sys.exit(f"error: expected 4 compile argument lines in {path}, found {count}")
+open(path, "w").write(text)
+EOF
+  cat >>"${WORK_DIR}/buildscripts/common.sh" <<EOF
+
+# Added by IINA other/build_deps.sh --cpu: add CPU tuning to the flags of
+# cmake, autotools and FFmpeg builds. Later flags win, so -O3 replaces -O2.
+eval "_iina_base_\$(declare -f setup_arch_env)"
+setup_arch_env() {
+    _iina_base_setup_arch_env "\$@"
+    local opt="-mcpu=${CPU} -O3"
+    export CFLAGS="\${CFLAGS} \${opt}"
+    export CXXFLAGS="\${CXXFLAGS} \${opt}"
+    export OBJCFLAGS="\${OBJCFLAGS} \${opt}"
+}
+EOF
+fi
 
 # 3. Build every dependency, then package the dylibs the way the official
 #    release workflow does.

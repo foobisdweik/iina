@@ -81,9 +81,25 @@ IINA can render video with mpv's `gpu-next` renderer. This renderer uses [libpla
 
 3. Open `iina.xcodeproj` in Xcode and build the project.
 
-The pinned versions are in `other/deps/versions.env`, and the mpv patch is in `other/deps/patches/mpv/`. You can also run the "Build with gpu-next" GitHub Actions workflow, which builds the dependencies and IINA and uploads a DMG.
+The pinned versions are in `other/deps/versions.env`, and the mpv patches are in `other/deps/patches/mpv/`. You can also run the "Build with gpu-next" GitHub Actions workflow, which builds the dependencies and IINA and uploads a DMG.
 
 The setting **Settings > Video > Use gpu-next renderer** is on by default. If libmpv has no `gpu-next` render API, for example when you use the pre-compiled libraries, IINA uses the legacy renderer. The log then shows `falling back to the legacy gpu renderer`. To go back to the pre-compiled libraries, run `other/download_libs.sh` again.
+
+#### Optimizing for an M1 Mac
+
+`other/build_m1.sh` builds the dependencies and IINA for Apple Silicon, optimized for the M1 CPU:
+
+```console
+other/build_m1.sh
+```
+
+- All dependencies are built with `-mcpu=apple-m1 -O3`. `-mcpu=apple-m1` lets the compiler use the M1's instructions (for example, dot product and half-precision float) and its instruction scheduling.
+- IINA's C and Objective-C code is built with `-mcpu=apple-m1 -O3`, and its Swift code with `-target-cpu apple-m1`.
+- `-ffast-math` is not used, because mpv and libplacebo depend on exact float behavior.
+
+The app is in `build/apple-m1/Build/Products/Release/IINA.app`. It runs only on Macs with an M1 or newer Apple Silicon CPU, not on Intel Macs. Use `--cpu apple-m2` (or newer) to tune for a later CPU, and `--skip-deps` to rebuild only the app. In the "Build with gpu-next" workflow, set **cpu** to `apple-m1`.
+
+Expect small gains. Most video work happens in hand-written assembly (FFmpeg, dav1d), on the GPU (libplacebo) or in the VideoToolbox hardware decoder, and compiler flags do not change that code.
 
 ### Building mpv manually
 
