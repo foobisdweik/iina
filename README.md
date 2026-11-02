@@ -81,7 +81,7 @@ IINA can render video with mpv's `gpu-next` renderer. This renderer uses [libpla
 
 3. Open `iina.xcodeproj` in Xcode and build the project.
 
-The pinned versions are in `other/deps/versions.env`, and the mpv patch is in `other/deps/patches/mpv/`. You can also run the "Build with gpu-next" GitHub Actions workflow, which builds the dependencies and IINA and uploads a DMG.
+The pinned versions are in `other/deps/versions.env`, and the mpv patches are in `other/deps/patches/mpv/`. You can also run the "Build with gpu-next" GitHub Actions workflow, which builds the dependencies and IINA and uploads a DMG.
 
 The setting **Settings > Video > Use gpu-next renderer** is on by default. If libmpv has no `gpu-next` render API, for example when you use the pre-compiled libraries, IINA uses the legacy renderer. The log then shows `falling back to the legacy gpu renderer`. To go back to the pre-compiled libraries, run `other/download_libs.sh` again.
 

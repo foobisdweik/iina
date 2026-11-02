@@ -5,8 +5,9 @@
 # This script uses IINA's official build scripts (iina/deps-buildscripts) at
 # the commit pinned in other/deps/versions.env, with these changes:
 #   * mpv is built from mpv master at a pinned commit, not from the v0.41.0
-#     release, and the patch in other/deps/patches/mpv/ adds the gpu-next
-#     OpenGL render API (MPV_RENDER_API_TYPE_OPENGL_NEXT).
+#     release. The patches in other/deps/patches/mpv/ add the gpu-next
+#     OpenGL render API (MPV_RENDER_API_TYPE_OPENGL_NEXT) and fix the macOS
+#     build without Vulkan.
 #   * libplacebo is updated, because mpv master needs a newer version.
 #   * The mpv patches of the build scripts are not applied, because all of
 #     them are already part of mpv master.
