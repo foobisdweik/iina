@@ -671,6 +671,8 @@
 "settings.toneMappingParamOverride.label" = "Parametar podešavanja";
 "settings.toneMappingTargetPeak.desc" = "Izmjerena najviša svjetlina ekrana. IINA standardno automatski prepoznaje ovu vrijednost. Ako prepoznavanje ne uspije, ciljna najviša svjetlina će se postaviti na odgovarajuću vrijednost na temelju prijenosnih karakteristika ekrana. Aktiviraj ovu postavku ako želiš ručno odrediti svjetlinu ekrana.";
 "settings.toneMappingTargetPeak.label" = "Ciljani najviši ton";
+"settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
+"settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
 "settings.videoThreads.desc" = "Standardno: 0 (Automatski)";
 "settings.videoThreads.label" = "Broj niza";
 

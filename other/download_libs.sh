@@ -8,6 +8,7 @@ ARCH="universal"
 YT_DLP_SOURCE="github"
 PARALLEL_DOWNLOADS=5
 SKIP_PLUGINS=false
+SKIP_DYLIBS=false
 
 DYLIBS_DOWNLOAD_PATH="https://iina.io/dylibs/${ARCH}"
 YT_DLP_DOWNLOAD_PATH="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
@@ -27,6 +28,7 @@ printUsageHelp() {
   echo -e "    ${GREEN}$0 [--yt-dlp-src] <SRC>:${NC}  Source to download youtube-dl from: github | iina"
   echo -e "    ${GREEN}$0 [--parallel] <N>:${NC}      Number of parallel downloads (default: 5)"
   echo -e "    ${GREEN}$0 [--skip-plugins]:${NC}      Skip downloading official plugins"
+  echo -e "    ${GREEN}$0 [--skip-dylibs]:${NC}       Skip downloading dylibs (use with other/build_deps.sh)"
   echo
 }
 
@@ -107,6 +109,10 @@ while [[ $# -gt 0 ]]; do
     SKIP_PLUGINS=true
     shift
     ;;
+  --skip-dylibs)
+    SKIP_DYLIBS=true
+    shift
+    ;;
   --)
     shift
     break
@@ -173,29 +179,55 @@ EXEC_PATH="$DEPS_PATH/executable"
 PLUGIN_PATH="$DEPS_PATH/plugins"
 YT_DLP_PATH="$EXEC_PATH/youtube-dl"
 
-IFS=$'\n' read -r -d '' -a files < <(curl -s "${DYLIBS_DOWNLOAD_PATH}/filelist.txt" && printf '\0')
+if [[ "$SKIP_DYLIBS" == true ]]; then
+  echo -e "${YELLOW}Skipping dylib downloads.${NC}"
+else
+  IFS=$'\n' read -r -d '' -a files < <(curl -s "${DYLIBS_DOWNLOAD_PATH}/filelist.txt" && printf '\0')
+  if [[ ${#files[@]} -eq 0 ]]; then
+    echo -e "${RED}Failed to download the dylib file list from ${DYLIBS_DOWNLOAD_PATH}.${NC}" >&2
+    exit 1
+  fi
 
-mkdir -p "$LIB_PATH"
+  mkdir -p "$LIB_PATH"
+  # Remove dylibs from an earlier download or from other/build_deps.sh, so that
+  # deps/lib holds exactly the downloaded set.
+  find "$LIB_PATH" -maxdepth 1 -name '*.dylib' -delete
 
-echo -e "${BLUE}Starting downloads in parallel...${NC}"
+  echo -e "${BLUE}Starting downloads in parallel...${NC}"
 
-# Function to download a single file
-download_file() {
-  local file="$1"
-  echo -e "${YELLOW}Downloading ${file}...${NC}"
-  curl -s "${DYLIBS_DOWNLOAD_PATH}/${file}" -o "${LIB_PATH}/${file}" && echo -e "${GREEN}Downloaded ${file}${NC}"
-}
+  # Function to download a single file
+  download_file() {
+    local file="$1"
+    echo -e "${YELLOW}Downloading ${file}...${NC}"
+    # -f: fail on an HTTP error instead of saving the error page as the dylib.
+    # --retry: retry transient failures, which otherwise leave a truncated dylib.
+    if curl -s -f -L --retry 3 --retry-delay 2 "${DYLIBS_DOWNLOAD_PATH}/${file}" -o "${LIB_PATH}/${file}"; then
+      echo -e "${GREEN}Downloaded ${file}${NC}"
+    else
+      echo -e "${RED}Failed to download ${file}${NC}" >&2
+      rm -f "${LIB_PATH}/${file}"
+      return 1
+    fi
+  }
 
-# Export the function so it can be used by xargs
-export -f download_file
-export DYLIBS_DOWNLOAD_PATH
-export LIB_PATH
-export YELLOW
-export GREEN
-export NC
+  # Export the function so it can be used by xargs
+  export -f download_file
+  export DYLIBS_DOWNLOAD_PATH
+  export LIB_PATH
+  export YELLOW
+  export GREEN
+  export RED
+  export NC
 
-# Process files in smaller batches using xargs
-printf "%s\n" "${files[@]}" | xargs -n 1 -P "$PARALLEL_DOWNLOADS" bash -c 'download_file "$@"' _
+  # Process files in smaller batches using xargs
+  if ! printf "%s\n" "${files[@]}" | xargs -n 1 -P "$PARALLEL_DOWNLOADS" bash -c 'download_file "$@"' _; then
+    echo -e "${RED}Some dylibs failed to download. Run this script again.${NC}" >&2
+    exit 1
+  fi
+
+  # Make the dylib references in iina.xcodeproj match the downloaded dylibs.
+  python3 "$ROOT_PATH/other/sync_xcode_dylibs.py" || exit 1
+fi
 
 mkdir -p "$EXEC_PATH"
 echo -e "${YELLOW}Downloading yt-dlp...${NC}"

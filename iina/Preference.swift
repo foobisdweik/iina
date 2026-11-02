@@ -184,6 +184,11 @@ struct Preference {
     static let videoThreads = Key("videoThreads")
     static let hardwareDecoder = Key("hardwareDecoder")
     static let forceDedicatedGPU = Key("forceDedicatedGPU")
+    /// Render video with mpv's `gpu-next` renderer (libplacebo) instead of the legacy `gpu` renderer.
+    ///
+    /// This requires a libmpv that provides the `MPV_RENDER_API_TYPE_OPENGL_NEXT` render API. If the render API is not
+    /// available then IINA falls back to the legacy renderer. The setting is applied when a player is created.
+    static let useGpuNextRenderer = Key("useGpuNextRenderer")
     static let loadIccProfile = Key("loadIccProfile")
     static let enableHdrSupport = Key("enableHdrSupport")
     static let enableToneMapping = Key("enableToneMapping")
@@ -1149,6 +1154,7 @@ struct Preference {
     .videoThreads: 0,
     .hardwareDecoder: HardwareDecoderOption.auto.rawValue,
     .forceDedicatedGPU: false,
+    .useGpuNextRenderer: true,
     .loadIccProfile: true,
     .enableHdrSupport: true,
     .enableToneMapping: true,
@@ -1521,6 +1527,7 @@ struct Preference {
            .touchbarShowRemainingTime,
            .trackAllFilesInRecentOpenMenu,
            .useAppleRemote,
+           .useGpuNextRenderer,
            .useLegacyFullScreen,
            .useLiquidGlassOSC,
            .useLiquidGlassOSD,

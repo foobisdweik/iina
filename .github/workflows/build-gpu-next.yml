@@ -1,0 +1,90 @@
+name: Build with gpu-next
+
+# Builds all dependencies from source with other/build_deps.sh (libmpv from
+# mpv master with the gpu-next render API), then builds IINA and uploads a DMG.
+# A full build takes one to three hours, so it only runs on demand or when the
+# dependency build files change.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture to build"
+        type: choice
+        options: [arm64, universal]
+        default: arm64
+  push:
+    paths:
+      - "other/deps/**"
+      - "other/build_deps.sh"
+      - "other/sync_xcode_dylibs.py"
+      - ".github/workflows/build-gpu-next.yml"
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 360
+    env:
+      ARCH: ${{ inputs.arch || 'arm64' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select the newest Xcode
+        run: |
+          xcode="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          echo "Using ${xcode}"
+          echo "DEVELOPER_DIR=${xcode}/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Install build tools
+        run: brew install meson ninja cmake pkg-config autoconf automake libtool nasm
+
+      - name: Cache dependency sources
+        uses: actions/cache@v4
+        with:
+          path: deps/buildscripts/sources
+          key: deps-sources-${{ hashFiles('other/deps/versions.env') }}
+
+      - name: Build dependencies
+        run: ./other/build_deps.sh --arch "$ARCH"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check libmpv
+        run: |
+          grep -n 'MPV_RENDER_API_TYPE_OPENGL_NEXT' deps/include/mpv/render.h
+          strings deps/lib/libmpv.2.dylib | grep -x 'opengl-next'
+          otool -L deps/lib/libmpv.2.dylib
+          git status --short iina.xcodeproj
+
+      - name: Build IINA
+        run: |
+          if [[ "$ARCH" == "universal" ]]; then archs="arm64 x86_64"; else archs="$ARCH"; fi
+          xcodebuild -project iina.xcodeproj -scheme iina -configuration Nightly \
+            -derivedDataPath . ONLY_ACTIVE_ARCH=NO ARCHS="$archs"
+
+      - name: Check the app bundle
+        run: |
+          app="Build/Products/Nightly/IINA.app"
+          ls "$app/Contents/Frameworks"
+          # Every dylib in deps/lib must be in the bundle, or the app fails to launch.
+          for lib in deps/lib/*.dylib; do
+            test -f "$app/Contents/Frameworks/$(basename "$lib")" || { echo "missing $(basename "$lib")"; exit 1; }
+          done
+          codesign --verify --deep --strict "$app" || echo "::warning::codesign could not verify the ad-hoc signature"
+
+      - name: Create DMG
+        run: hdiutil create -volname "IINA gpu-next" -srcfolder Build/Products/Nightly/IINA.app -ov -format UDZO IINA.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: IINA-gpu-next-${{ env.ARCH }}
+          path: IINA.dmg
+          archive: false

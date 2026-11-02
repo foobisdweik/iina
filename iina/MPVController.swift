@@ -93,6 +93,10 @@ class MPVController: NSObject {
   var mpv: OpaquePointer!
   var mpvRenderContext: OpaquePointer?
 
+  /// The mpv render API in use, either `MPV_RENDER_API_TYPE_OPENGL_NEXT` (`gpu-next` renderer) or
+  /// `MPV_RENDER_API_TYPE_OPENGL` (legacy `gpu` renderer). This is `nil` until the renderer has been initialized.
+  private(set) var renderAPI: String?
+
   private var openGLContext: CGLContextObj! = nil
 
   /// [DispatchQueue](https://developer.apple.com/documentation/dispatch/dispatchqueue) for reading `mpv`
@@ -129,6 +133,8 @@ class MPVController: NSObject {
     MPVOption.PlaybackControl.pause: MPV_FORMAT_FLAG,
     MPVOption.PlaybackControl.loopPlaylist: MPV_FORMAT_STRING,
     MPVOption.PlaybackControl.loopFile: MPV_FORMAT_STRING,
+    MPVOption.PlaybackControl.abLoopA: MPV_FORMAT_NONE,
+    MPVOption.PlaybackControl.abLoopB: MPV_FORMAT_NONE,
     MPVProperty.chapter: MPV_FORMAT_INT64,
     MPVOption.Video.deinterlace: MPV_FORMAT_FLAG,
     MPVOption.Video.hwdec: MPV_FORMAT_STRING,
@@ -386,7 +392,7 @@ class MPVController: NSObject {
                   verboseIfDefault: true)
 
     setUserOption(.initialWindowSizePosition, type: .string, forName: MPVOption.Window.geometry,
-                  level: .verbose)
+                  level: .verbose, resetInvalidValue: "")
 
     // - Codec
 
@@ -665,25 +671,55 @@ class MPVController: NSObject {
   ///
   /// This method creates and initializes the `mpv` renderer and sets the callback that `mpv` calls when a new video frame is available.
   ///
+  /// IINA prefers the `gpu-next` renderer (render API `MPV_RENDER_API_TYPE_OPENGL_NEXT`) when the
+  /// `useGpuNextRenderer` setting is enabled. The `gpu-next` renderer uses
+  /// [libplacebo](https://code.videolan.org/videolan/libplacebo) and is the renderer that mpv recommends. If the libmpv
+  /// in use does not provide that render API, or the renderer fails to initialize, then IINA falls back to the legacy
+  /// `gpu` renderer (render API `MPV_RENDER_API_TYPE_OPENGL`).
+  ///
   /// - Note: Advanced control must be enabled for the screenshot command to work when the window flag is used. See issue
   ///         [#4822](https://github.com/iina/iina/issues/4822) for details.
   func mpvInitRendering() {
     guard let mpv else {
       fatalError("mpvInitRendering() should be called after mpv handle being initialized!")
     }
-    let apiType = UnsafeMutableRawPointer(mutating: (MPV_RENDER_API_TYPE_OPENGL as NSString).utf8String)
     var openGLInitParams = mpv_opengl_init_params(get_proc_address: mpvGetOpenGLFunc,
                                                   get_proc_address_ctx: nil)
     withUnsafeMutablePointer(to: &openGLInitParams) { openGLInitParams in
       var advanced: CInt = 1
       withUnsafeMutablePointer(to: &advanced) { advanced in
-        var params = [
-          mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: apiType),
-          mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: openGLInitParams),
-          mpv_render_param(type: MPV_RENDER_PARAM_ADVANCED_CONTROL, data: advanced),
-          mpv_render_param()
-        ]
-        chkErr(mpv_render_context_create(&mpvRenderContext, mpv, &params))
+        /// Create the render context for the given render API and return the mpv status code.
+        func createRenderContext(_ api: String) -> Int32 {
+          // The API string must stay valid during the call, so use withCString instead of a bridged pointer.
+          return api.withCString { apiType in
+            var params = [
+              mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(mutating: apiType)),
+              mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: openGLInitParams),
+              mpv_render_param(type: MPV_RENDER_PARAM_ADVANCED_CONTROL, data: advanced),
+              mpv_render_param()
+            ]
+            return mpv_render_context_create(&self.mpvRenderContext, mpv, &params)
+          }
+        }
+        var api = MPV_RENDER_API_TYPE_OPENGL
+        var status: Int32
+        if Preference.bool(for: .useGpuNextRenderer) {
+          api = MPV_RENDER_API_TYPE_OPENGL_NEXT
+          status = createRenderContext(api)
+          if status < 0 {
+            log("""
+              Unable to use the gpu-next renderer (\(String(cString: mpv_error_string(status)))), \
+              falling back to the legacy gpu renderer
+              """, level: .warning)
+            api = MPV_RENDER_API_TYPE_OPENGL
+            status = createRenderContext(api)
+          }
+        } else {
+          status = createRenderContext(api)
+        }
+        chkErr(status)
+        renderAPI = api
+        log("Using mpv render API: \(api)")
       }
       openGLContext = CGLGetCurrentContext()
       mpv_render_context_set_update_callback(mpvRenderContext!, mpvUpdateCallback, mutableRawPointerOf(obj: player.mainWindow.videoView.videoLayer))
@@ -1315,6 +1351,10 @@ class MPVController: NSObject {
         player.postNotification(.iinaLoopStatusChanged)
       }
 
+    case MPVOption.PlaybackControl.abLoopA, MPVOption.PlaybackControl.abLoopB:
+      // Loop points could also be changed by plugins, input.conf bindings or mpv scripts.
+      DispatchQueue.main.async { self.player.syncAbLoop() }
+
     case MPVOption.Video.deinterlace:
       guard let data = UnsafePointer<Bool>(OpaquePointer(property.data))?.pointee else {
         logPropertyValueError(MPVOption.Video.deinterlace, property.format)
@@ -1531,26 +1571,33 @@ class MPVController: NSObject {
       break
     }
 
-    // This code is running in the com.colliderli.iina.controller dispatch queue. We must not run
-    // plugins from a task in this queue. Accessing EventController data from a thread in this queue
-    // results in data races that can cause a crash. See issue 3986.
+    // mpv invalidates property.data on the next mpv_wait_event call, so copy it before dispatching.
+    let data: Any
+    if let propertyData = property.data {
+      switch property.format {
+      case MPV_FORMAT_FLAG:
+        data = propertyData.load(as: Int32.self) != 0
+      case MPV_FORMAT_INT64:
+        data = propertyData.load(as: Int64.self)
+      case MPV_FORMAT_DOUBLE:
+        data = propertyData.load(as: Double.self)
+      case MPV_FORMAT_STRING:
+        if let string = propertyData.load(as: UnsafePointer<CChar>?.self) {
+          data = String(cString: string)
+        } else {
+          data = NSNull()
+        }
+      default:
+        data = 0
+      }
+    } else {
+      data = NSNull()
+    }
+
+    // EventController and plugin callbacks must only be accessed on the main queue. See issue 3986.
     DispatchQueue.main.async { [self] in
       let eventName = EventController.Name("mpv.\(name).changed")
       if player.events.hasListener(for: eventName) {
-        // FIXME: better convert to JSValue before passing to call()
-        let data: Any
-        switch property.format {
-        case MPV_FORMAT_FLAG:
-          data = property.data.bindMemory(to: Bool.self, capacity: 1).pointee
-        case MPV_FORMAT_INT64:
-          data = property.data.bindMemory(to: Int64.self, capacity: 1).pointee
-        case MPV_FORMAT_DOUBLE:
-          data = property.data.bindMemory(to: Double.self, capacity: 1).pointee
-        case MPV_FORMAT_STRING:
-          data = property.data.bindMemory(to: String.self, capacity: 1).pointee
-        default:
-          data = 0
-        }
         player.events.emit(eventName, data: data)
       }
     }
@@ -1659,6 +1706,7 @@ class MPVController: NSObject {
   private func setUserOption(_ key: Preference.Key, type: UserOptionType, forName name: String,
                              sync: Bool = true, level: Logger.Level = .debug,
                              verboseIfDefault: Bool = false,
+                             resetInvalidValue: String? = nil,
                              transformer: OptionObserverInfo.Transformer? = nil) {
     var code: Int32 = 0
 
@@ -1700,6 +1748,12 @@ class MPVController: NSObject {
       } else {
         code = 0
       }
+    }
+
+    if code < 0, let resetInvalidValue {
+      log("Invalid \(name) setting \(Preference.string(for: key) ?? ""); restoring default", level: .warning)
+      Preference.set(resetInvalidValue, for: key)
+      code = setOptionString(name, resetInvalidValue, level: level)
     }
 
     if code < 0 {

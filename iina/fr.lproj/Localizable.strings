@@ -671,6 +671,8 @@
 "settings.toneMappingParamOverride.label" = "Paramètre de réglage";
 "settings.toneMappingTargetPeak.desc" = "Luminosité maximale mesurée de l'écran. Par défaut IINA détecte cette valeur. Si la détection échoue, le pic cible sera défini à une valeur appropriée en fonction des caractéristiques de transfert de l'écran. Activez ce paramètre pour spécifier manuellement la luminosité de l'écran.";
 "settings.toneMappingTargetPeak.label" = "Pic cible";
+"settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
+"settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
 "settings.videoThreads.desc" = "Défaut : 0 (auto)";
 "settings.videoThreads.label" = "Nombre de processus";
 

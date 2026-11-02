@@ -55,8 +55,8 @@ class MainMenuActionHandler: NSResponder, NSMenuItemValidation {
     guard let url = player.info.currentURL, !player.info.isNetworkResource else { return }
     do {
       let index = player.mpv.getInt(MPVProperty.playlistPos)
+      guard try Utility.trashOrRemoveItem(at: url) else { return }
       player.playlistRemove(index)
-      try FileManager.default.trashItem(at: url, resultingItemURL: nil)
     } catch let error {
       Utility.showAlert("playlist.error_deleting", arguments: [error.localizedDescription])
     }
@@ -422,15 +422,15 @@ extension MainMenuActionHandler {
   }
 
   @objc func saveDownloadedSub(_ sender: NSMenuItem) {
-    let selected = player.info.$subTracks.withLock { $0.filter { $0.id == player.info.sid } }
-    guard selected.count > 0 else {
-      Utility.showAlert("sub.no_selected")
-
-      return
+    let selectedIDs = [player.info.sid, player.info.secondSid].compactMap { $0 }
+    let selected = player.info.$subTracks.withLock { tracks in
+      selectedIDs.compactMap { id in
+        tracks.first {
+          $0.id == id && $0.externalFilename?.contains("/var/") == true
+        }
+      }.first
     }
-    let sub = selected[0]
-    // make sure it's a downloaded sub
-    guard let path = sub.externalFilename, path.contains("/var/") else {
+    guard let path = selected?.externalFilename else {
       Utility.showAlert("sub.no_selected")
       return
     }

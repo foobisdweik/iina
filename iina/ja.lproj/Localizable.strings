@@ -672,6 +672,8 @@
 "settings.toneMappingParamOverride.label" = "調整パラメータ";
 "settings.toneMappingTargetPeak.desc" = "ディスプレイの測定済み最大輝度。IINAはデフォルトでこの値を検出します。検出できない場合には、ディスプレイの伝達特性に基づき、目標とする最大輝度を適切な値に設定します。ディスプレイ輝度を手動で指定するには、この設定を有効にしてください。";
 "settings.toneMappingTargetPeak.label" = "ターゲットピーク値";
+"settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
+"settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
 "settings.videoThreads.desc" = "デフォルト: 0 （自動）";
 "settings.videoThreads.label" = "スレッド数";
 

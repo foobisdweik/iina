@@ -671,6 +671,8 @@
 "settings.toneMappingParamOverride.label" = "İnce ayar parametresi";
 "settings.toneMappingTargetPeak.desc" = "Ekranın ölçülen tepe parlaklığı. IINA, bu değeri saptanmış olarak otomatik algılar. Algılama başarısız olursa hedef tepe parlaklığı, ekranın aktarım karakteristikleri temel alınarak uygun bir değere ayarlanır. Ekranın parlaklık değerini elle belirlemek için bu ayarı etkinleştirin.";
 "settings.toneMappingTargetPeak.label" = "Hedef zirve";
+"settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
+"settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
 "settings.videoThreads.desc" = "Saptanmış: 0 (Otomatik)";
 "settings.videoThreads.label" = "İş parçacığı sayısı";
 

@@ -115,4 +115,6 @@ browser/Firefox_Open_In_IINA/*
 
 deps/executable/youtube-dl
 deps/plugins
+# Work directory of other/build_deps.sh (build scripts, sources, build files)
+deps/buildscripts/
 

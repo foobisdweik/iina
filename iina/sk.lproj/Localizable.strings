@@ -672,6 +672,8 @@ Nočné zostavy sa neodporúčajú používať ako denný ovládač. V súčasno
 "settings.toneMappingParamOverride.label" = "Tuning parameter";
 "settings.toneMappingTargetPeak.desc" = "Measured peak brightness of the display. By default IINA detects this value. If detection fails, target peak will be set to an appropriate value based on the transfer characteristics of the display. Enable this setting to manually specify the display's brightness.";
 "settings.toneMappingTargetPeak.label" = "Cieľová špička";
+"settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
+"settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
 "settings.videoThreads.desc" = "Predvolené: 0 (Automaticky)";
 "settings.videoThreads.label" = "Počet threadov";
 
