@@ -199,7 +199,15 @@ else
   download_file() {
     local file="$1"
     echo -e "${YELLOW}Downloading ${file}...${NC}"
-    curl -s "${DYLIBS_DOWNLOAD_PATH}/${file}" -o "${LIB_PATH}/${file}" && echo -e "${GREEN}Downloaded ${file}${NC}"
+    # -f: fail on an HTTP error instead of saving the error page as the dylib.
+    # --retry: retry transient failures, which otherwise leave a truncated dylib.
+    if curl -s -f -L --retry 3 --retry-delay 2 "${DYLIBS_DOWNLOAD_PATH}/${file}" -o "${LIB_PATH}/${file}"; then
+      echo -e "${GREEN}Downloaded ${file}${NC}"
+    else
+      echo -e "${RED}Failed to download ${file}${NC}" >&2
+      rm -f "${LIB_PATH}/${file}"
+      return 1
+    fi
   }
 
   # Export the function so it can be used by xargs
@@ -208,10 +216,14 @@ else
   export LIB_PATH
   export YELLOW
   export GREEN
+  export RED
   export NC
 
   # Process files in smaller batches using xargs
-  printf "%s\n" "${files[@]}" | xargs -n 1 -P "$PARALLEL_DOWNLOADS" bash -c 'download_file "$@"' _
+  if ! printf "%s\n" "${files[@]}" | xargs -n 1 -P "$PARALLEL_DOWNLOADS" bash -c 'download_file "$@"' _; then
+    echo -e "${RED}Some dylibs failed to download. Run this script again.${NC}" >&2
+    exit 1
+  fi
 
   # Make the dylib references in iina.xcodeproj match the downloaded dylibs.
   python3 "$ROOT_PATH/other/sync_xcode_dylibs.py" || exit 1
