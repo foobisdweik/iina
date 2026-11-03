@@ -9,8 +9,16 @@
 #     OpenGL render API (MPV_RENDER_API_TYPE_OPENGL_NEXT) and fix the macOS
 #     build without Vulkan.
 #   * libplacebo is updated, because mpv master needs a newer version.
+#   * Vulkan is enabled in libplacebo and mpv, and a patch adds the Vulkan
+#     render API (MPV_RENDER_API_TYPE_VULKAN, header mpv/render_vk.h), so
+#     that gpu-next can run compute shaders. Two extra build scripts install
+#     MoltenVK (Vulkan on Metal, bundled as libMoltenVK.dylib) and glslang
+#     (a shader compiler, linked statically into libplacebo).
 #   * The mpv patches of the build scripts are not applied, because all of
 #     them are already part of mpv master.
+#   * zlib and expat always come from the macOS SDK (build-sdk-pkgconfig.sh),
+#     and CMAKE_PREFIX_PATH is cleared, so that no dylib links to a library
+#     from MacPorts or Homebrew.
 #
 # After the build, the script copies the dylibs to deps/lib and the headers to
 # deps/include, updates iina.xcodeproj to match the dylibs, and downloads
@@ -113,11 +121,40 @@ cat >>"${WORK_DIR}/versions.env" <<EOF
 LIBPLACEBO_VERSION="${LIBPLACEBO_VERSION}"
 MPV_REPO="${MPV_REPO}"
 MPV_COMMIT="${MPV_COMMIT}"
+MOLTENVK_VERSION="${MOLTENVK_VERSION}"
+MOLTENVK_SHA256="${MOLTENVK_SHA256}"
+MOLTENVK_URL="${MOLTENVK_URL}"
+GLSLANG_VERSION="${GLSLANG_VERSION}"
+GLSLANG_SHA256="${GLSLANG_SHA256}"
+GLSLANG_URL="${GLSLANG_URL}"
 EOF
-cp "${DEPS_OVERLAY}/build-mpv.sh" "${WORK_DIR}/buildscripts/build-mpv.sh"
-rm -rf "${WORK_DIR}/patches/mpv"
-mkdir -p "${WORK_DIR}/patches/mpv"
-cp "${DEPS_OVERLAY}"/patches/mpv/*.patch "${WORK_DIR}/patches/mpv/"
+for script in build-mpv.sh build-libplacebo.sh build-moltenvk.sh build-glslang.sh \
+              build-sdk-pkgconfig.sh; do
+  cp "${DEPS_OVERLAY}/${script}" "${WORK_DIR}/buildscripts/${script}"
+done
+for dep in mpv libplacebo; do
+  rm -rf "${WORK_DIR}/patches/${dep}"
+  mkdir -p "${WORK_DIR}/patches/${dep}"
+  cp "${DEPS_OVERLAY}/patches/${dep}"/*.patch "${WORK_DIR}/patches/${dep}/"
+done
+# Add the extra build scripts to build.sh: the SDK .pc files before every
+# other library, and MoltenVK and glslang before libplacebo, which needs both.
+python3 - "${WORK_DIR}/build.sh" <<'PYEOF'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+def insert_before(line, extra):
+    global text
+    if text.count(line) != 1:
+        sys.exit(f"error: expected one '{line}' line in {path}")
+    text = text.replace(line, extra + line)
+insert_before("run buildscripts/build-freetype.sh",
+    "run buildscripts/build-sdk-pkgconfig.sh   # zlib and expat from the macOS SDK (added by IINA)\n")
+insert_before("run buildscripts/build-libplacebo.sh",
+    "run buildscripts/build-moltenvk.sh        # Vulkan on Metal (added by IINA)\n"
+    "run buildscripts/build-glslang.sh         # GLSL to SPIR-V compiler for libplacebo (added by IINA)\n")
+open(path, "w").write(text)
+PYEOF
 # build-mpv.sh reads MPV_REPO and MPV_COMMIT from versions.env through common.sh.
 export MPV_REPO MPV_COMMIT
 
@@ -161,7 +198,10 @@ EOF
 fi
 
 # 3. Build every dependency, then package the dylibs the way the official
-#    release workflow does.
+#    release workflow does. CMake searches the directories in
+#    CMAKE_PREFIX_PATH (for example /opt/local from MacPorts) before the SDK,
+#    so clear it for the build.
+unset CMAKE_PREFIX_PATH
 log "Building the dependencies for ${ARCH}. This takes a long time."
 (cd "$WORK_DIR" && bash build.sh "$BUILD_ARCH")
 
@@ -181,6 +221,13 @@ else
   done
 fi
 (cd "$WORK_DIR" && bash copy-headers.sh "install/${HEADER_ARCH}/include" "output/include")
+# copy-headers.sh copies only some mpv headers. IINA's Vulkan renderer also
+# needs mpv/render_vk.h and the Vulkan C headers that it includes. The C++
+# headers (*.hpp, *.cppm) are about 20 MB and IINA does not use them.
+cp "${WORK_DIR}/install/${HEADER_ARCH}/include/mpv/render_vk.h" "${WORK_DIR}/output/include/mpv/"
+mkdir -p "${WORK_DIR}/output/include/vulkan"
+cp "${WORK_DIR}/install/${HEADER_ARCH}/include/vulkan"/*.h "${WORK_DIR}/output/include/vulkan/"
+cp -R "${WORK_DIR}/install/${HEADER_ARCH}/include/vk_video" "${WORK_DIR}/output/include/"
 
 # 4. Install the result into deps/.
 log "Installing the dylibs into deps/lib"
@@ -190,6 +237,9 @@ find "$LIB_PATH" -maxdepth 1 -name '*.dylib' -delete
 cp -p "$OUTPUT_LIBS"/*.dylib "$LIB_PATH/"
 
 log "Installing the headers into deps/include"
+# Recreate the Vulkan folders, so that headers from an earlier build that are
+# no longer copied do not stay behind.
+rm -rf "${ROOT_PATH}/deps/include/vulkan" "${ROOT_PATH}/deps/include/vk_video"
 for dir in "${WORK_DIR}/output/include"/*/; do
   name="$(basename "$dir")"
   mkdir -p "${ROOT_PATH}/deps/include/${name}"
@@ -197,6 +247,19 @@ for dir in "${WORK_DIR}/output/include"/*/; do
 done
 grep -q 'MPV_RENDER_API_TYPE_OPENGL_NEXT' "${ROOT_PATH}/deps/include/mpv/render.h" ||
   die "deps/include/mpv/render.h has no gpu-next render API"
+grep -q 'MPV_RENDER_API_TYPE_VULKAN' "${ROOT_PATH}/deps/include/mpv/render_vk.h" ||
+  die "deps/include/mpv/render_vk.h has no Vulkan render API"
+[[ -f "${LIB_PATH}/libMoltenVK.dylib" ]] || die "deps/lib/libMoltenVK.dylib is missing"
+# Every dylib may link only to other bundled dylibs (@rpath) and to system
+# libraries. A path such as /opt/local/lib/libz.1.dylib exists only on the
+# build Mac, so IINA would fail to start on other Macs.
+foreign="$(for lib in "$LIB_PATH"/*.dylib; do
+  [[ -L "$lib" ]] && continue
+  otool -L "$lib" | tail -n +2 | awk '{print $1}' |
+    { grep -Ev '^(@rpath/|/usr/lib/|/System/Library/)' || true; } | sed "s|^|$(basename "$lib"): |"
+done)"
+[[ -z "$foreign" ]] || die "dylibs link to libraries outside the app and the system:
+${foreign}"
 
 # 5. Make the dylib references in the Xcode project match deps/lib.
 log "Updating iina.xcodeproj"

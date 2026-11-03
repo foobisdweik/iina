@@ -1,0 +1,64 @@
+Find glslang in the vulkan-sdk directory
+
+IINA builds glslang as static libraries into its own directory and passes
+it with -Dvulkan-sdk. libplacebo already searches that directory for some
+glslang libraries, but not for libglslang and
+libglslang-default-resource-limits, and it never adds the include
+directory. A static library outside the system paths is then not found,
+because meson searches only the compiler's own library directories.
+
+This patch searches vulkan-sdk/lib for all glslang libraries and adds
+vulkan-sdk/include to the header check and to the compile arguments.
+---
+--- a/src/glsl/meson.build
++++ b/src/glsl/meson.build
+@@ -29,8 +29,16 @@
+ 
+ elif not glslang_req.disabled()
+ 
++  vulkan_sdk = get_option('vulkan-sdk')
++  vulkan_lib_dirs = []
++  glslang_inc_args = []
++  if vulkan_sdk != ''
++    vulkan_lib_dirs += [vulkan_sdk / 'lib']
++    glslang_inc_args += ['-I' + (vulkan_sdk / 'include')]
++  endif
++
+   glslang_deps = [
+-    cxx.find_library('glslang-default-resource-limits', required: false)
++    cxx.find_library('glslang-default-resource-limits', required: false, dirs: vulkan_lib_dirs)
+   ]
+ 
+   # meson doesn't respect generator expressions in INTERFACE_LINK_LIBRARIES
+@@ -38,11 +46,6 @@
+   # TODO: Use the following once it's fixed
+   # glslang = dependency('glslang', method: 'cmake', modules: ['glslang::SPIRV'])
+ 
+-  vulkan_sdk = get_option('vulkan-sdk')
+-  vulkan_lib_dirs = []
+-  if vulkan_sdk != ''
+-    vulkan_lib_dirs += [vulkan_sdk / 'lib']
+-  endif
+   prefer_static = get_option('prefer_static')
+   found_lib = false
+   foreach arg : [[prefer_static, false], [not prefer_static, glslang_req]]
+@@ -59,7 +62,7 @@
+ 
+     # Glslang 15.0.0 moved some code around, add also linking to glslang, while
+     # this is not needed for older versions, it will still work.
+-    glslang_deps += cxx.find_library('glslang', required: required, static: static)
++    glslang_deps += cxx.find_library('glslang', required: required, static: static, dirs: vulkan_lib_dirs)
+ 
+     if static
+       glslang_deps += [
+@@ -78,8 +81,8 @@
+     break
+   endforeach
+ 
+-  if found_lib and cc.has_header('glslang/build_info.h')
+-    glslang = declare_dependency(dependencies: glslang_deps)
++  if found_lib and cc.has_header('glslang/build_info.h', args: glslang_inc_args)
++    glslang = declare_dependency(dependencies: glslang_deps, compile_args: glslang_inc_args)
+   endif
+ 
+ endif

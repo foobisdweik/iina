@@ -4,7 +4,9 @@
 # other/build_deps.sh copies this file over the original. The original script
 # downloads a release tarball. This script clones mpv at the commit in
 # MPV_COMMIT instead, because no mpv release has the gpu-next render API yet.
-# The meson options are the same as in the original script.
+# The meson options are the same as in the original script, except that
+# Vulkan is enabled: the patches add MPV_RENDER_API_TYPE_VULKAN, which renders
+# with gpu-next on Vulkan (MoltenVK) and can run compute shaders.
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 
@@ -50,7 +52,7 @@ build_for_arch() {
         -Dlua=luajit \
         -Djavascript=enabled \
         -Dlcms2=enabled \
-        -Dvulkan=disabled \
+        -Dvulkan=enabled \
         -Dgl=enabled \
         -Dzimg=enabled \
         -Dlibbluray=enabled \
@@ -63,10 +65,16 @@ build_for_arch() {
     ninja -C "$build_dir" -j"$JOBS"
     ninja -C "$build_dir" install
 
-    # Stop here if the patch did not add the gpu-next render API. Without this
-    # check IINA would build, but silently fall back to the legacy renderer.
-    if ! grep -q 'MPV_RENDER_API_TYPE_OPENGL_NEXT' "$(get_prefix "$arch")/include/mpv/render.h"; then
+    # Stop here if the patches did not add the gpu-next render APIs. Without
+    # this check IINA would build, but silently fall back to another renderer.
+    local include_dir
+    include_dir="$(get_prefix "$arch")/include/mpv"
+    if ! grep -q 'MPV_RENDER_API_TYPE_OPENGL_NEXT' "${include_dir}/render.h"; then
         echo "ERROR: the installed mpv/render.h has no MPV_RENDER_API_TYPE_OPENGL_NEXT" >&2
+        exit 1
+    fi
+    if ! grep -q 'MPV_RENDER_API_TYPE_VULKAN' "${include_dir}/render_vk.h" 2>/dev/null; then
+        echo "ERROR: mpv/render_vk.h with MPV_RENDER_API_TYPE_VULKAN was not installed" >&2
         exit 1
     fi
 }
