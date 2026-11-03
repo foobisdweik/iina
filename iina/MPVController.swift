@@ -93,8 +93,9 @@ class MPVController: NSObject {
   var mpv: OpaquePointer!
   var mpvRenderContext: OpaquePointer?
 
-  /// The mpv render API in use, either `MPV_RENDER_API_TYPE_OPENGL_NEXT` (`gpu-next` renderer) or
-  /// `MPV_RENDER_API_TYPE_OPENGL` (legacy `gpu` renderer). This is `nil` until the renderer has been initialized.
+  /// The mpv render API in use: `MPV_RENDER_API_TYPE_VULKAN` (`gpu-next` renderer on Vulkan),
+  /// `MPV_RENDER_API_TYPE_OPENGL_NEXT` (`gpu-next` renderer on OpenGL) or `MPV_RENDER_API_TYPE_OPENGL` (legacy `gpu`
+  /// renderer). This is `nil` until the renderer has been initialized.
   private(set) var renderAPI: String?
 
   private var openGLContext: CGLContextObj! = nil
@@ -677,11 +678,30 @@ class MPVController: NSObject {
   /// in use does not provide that render API, or the renderer fails to initialize, then IINA falls back to the legacy
   /// `gpu` renderer (render API `MPV_RENDER_API_TYPE_OPENGL`).
   ///
+  /// When the video view has a `VulkanViewLayer` (setting `useVulkanRenderer`), IINA first tries the Vulkan render API,
+  /// which always uses `gpu-next`. If mpv cannot render with Vulkan, the view switches to the OpenGL layer and IINA continues
+  /// with the OpenGL render APIs above.
+  ///
   /// - Note: Advanced control must be enabled for the screenshot command to work when the window flag is used. See issue
   ///         [#4822](https://github.com/iina/iina/issues/4822) for details.
   func mpvInitRendering() {
     guard let mpv else {
       fatalError("mpvInitRendering() should be called after mpv handle being initialized!")
+    }
+    let videoView = player.mainWindow.videoView
+    if let vulkanLayer = videoView.videoLayer as? VulkanViewLayer {
+      let status = vulkanLayer.vulkan.createRenderContext(&mpvRenderContext, mpv: mpv)
+      if status >= 0 {
+        renderAPI = VulkanRenderAPIType
+        log("Using mpv render API: \(VulkanRenderAPIType) on \(vulkanLayer.vulkan.deviceName)")
+        mpv_render_context_set_update_callback(mpvRenderContext!, mpvUpdateCallback,
+                                               mutableRawPointerOf(obj: vulkanLayer))
+        return
+      }
+      log("Unable to use the Vulkan renderer (\(String(cString: mpv_error_string(status)))), falling back to OpenGL",
+          level: .warning)
+      mpvRenderContext = nil
+      videoView.fallBackToOpenGLLayer()
     }
     var openGLInitParams = mpv_opengl_init_params(get_proc_address: mpvGetOpenGLFunc,
                                                   get_proc_address_ctx: nil)
@@ -722,7 +742,7 @@ class MPVController: NSObject {
         log("Using mpv render API: \(api)")
       }
       openGLContext = CGLGetCurrentContext()
-      mpv_render_context_set_update_callback(mpvRenderContext!, mpvUpdateCallback, mutableRawPointerOf(obj: player.mainWindow.videoView.videoLayer))
+      mpv_render_context_set_update_callback(mpvRenderContext!, mpvUpdateCallback, mutableRawPointerOf(obj: videoView.videoLayer as AnyObject))
     }
   }
 
@@ -1902,6 +1922,6 @@ fileprivate func mpvGetOpenGLFunc(_ ctx: UnsafeMutableRawPointer?, _ name: Unsaf
 }
 
 fileprivate func mpvUpdateCallback(_ ctx: UnsafeMutableRawPointer?) {
-  let layer = bridge(ptr: ctx!) as ViewLayer
-  layer.update()
+  let layer = bridge(ptr: ctx!) as AnyObject
+  (layer as! VideoLayer).update(force: false)
 }

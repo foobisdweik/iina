@@ -673,6 +673,8 @@
 "settings.toneMappingTargetPeak.label" = "目标峰值";
 "settings.useGpuNextRenderer.desc" = "Render video with mpv's gpu-next renderer (libplacebo), which has better HDR, tone mapping and color handling. If the bundled mpv does not support it, IINA uses the legacy renderer. Takes effect after restarting IINA.";
 "settings.useGpuNextRenderer.label" = "Use gpu-next renderer";
+"settings.useVulkanRenderer.desc" = "Render video with the gpu-next renderer on Vulkan (MoltenVK) instead of OpenGL. Vulkan can run compute shaders, such as the ArtCNN upscaler, which OpenGL on macOS cannot. Always uses gpu-next. If Vulkan does not work, IINA uses OpenGL. Takes effect after restarting IINA.";
+"settings.useVulkanRenderer.label" = "Use Vulkan renderer";
 "settings.videoThreads.desc" = "默认：0（自动）";
 "settings.videoThreads.label" = "线程数";
 

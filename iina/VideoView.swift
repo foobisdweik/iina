@@ -14,9 +14,13 @@ class VideoView: NSView {
   weak var player: PlayerCore!
   var link: CVDisplayLink?
 
-  lazy var videoLayer: ViewLayer = {
-    let layer = ViewLayer(self)
-    return layer
+  /// The layer that mpv renders into: `VulkanViewLayer` when the `useVulkanRenderer` setting is on and Vulkan works,
+  /// otherwise the OpenGL `ViewLayer`.
+  lazy var videoLayer: VideoLayer = {
+    if Preference.bool(for: .useVulkanRenderer), let layer = VulkanViewLayer(self) {
+      return layer
+    }
+    return ViewLayer(self)
   }()
 
   @ReadWriteAtomic var isUninited = false
@@ -87,15 +91,48 @@ class VideoView: NSView {
   /// - Important: Once mpv has been instructed to quit accessing the mpv core can result in a crash, therefore locks must be
   ///     used to coordinate uninitializing the view so that other threads do not attempt to use the mpv core while it is shutting down.
   func uninit() {
-    player.mpv.lockAndSetOpenGLContext()
-    defer { player.mpv.unlockOpenGLContext() }
-    $isUninited.withWriteLock() { isUninited in
-      guard !isUninited else { return }
-      isUninited = true
+    withRenderLock {
+      $isUninited.withWriteLock() { isUninited in
+        guard !isUninited else { return }
+        isUninited = true
 
-      stopDisplayLink()
-      player.mpv.mpvUninitRendering()
+        stopDisplayLink()
+        player.mpv.mpvUninitRendering()
+        // The Vulkan device must outlive the mpv render context, which mpvUninitRendering freed.
+        (videoLayer as? VulkanViewLayer)?.destroyVulkan()
+      }
     }
+  }
+
+  /// Runs `body` while holding the lock that the video layer holds while it draws.
+  ///
+  /// For `ViewLayer` this is the OpenGL context lock. For `VulkanViewLayer` it is the layer's render lock.
+  private func withRenderLock(_ body: () -> Void) {
+    if let layer = videoLayer as? VulkanViewLayer {
+      layer.renderLock.lock()
+      defer { layer.renderLock.unlock() }
+      body()
+    } else {
+      player.mpv.lockAndSetOpenGLContext()
+      defer { player.mpv.unlockOpenGLContext() }
+      body()
+    }
+  }
+
+  /// Replaces the Vulkan layer with the OpenGL layer. `MPVController` calls this when mpv cannot render with Vulkan, so that
+  /// playback still works.
+  ///
+  /// This must be called on the main thread before the mpv render context exists, because `ViewLayer` makes its OpenGL
+  /// context current on this thread, and `mpvInitRendering` then creates the render context with it.
+  func fallBackToOpenGLLayer() {
+    guard let vulkanLayer = videoLayer as? VulkanViewLayer else { return }
+    vulkanLayer.destroyVulkan()
+    let glLayer = ViewLayer(self)
+    glLayer.colorspace = vulkanLayer.colorspace
+    glLayer.contentsScale = vulkanLayer.contentsScale
+    videoLayer = glLayer
+    layer = glLayer
+    log("Switched from the Vulkan layer to the OpenGL layer", level: .warning)
   }
 
   deinit {

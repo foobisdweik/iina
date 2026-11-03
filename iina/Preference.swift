@@ -189,6 +189,11 @@ struct Preference {
     /// This requires a libmpv that provides the `MPV_RENDER_API_TYPE_OPENGL_NEXT` render API. If the render API is not
     /// available then IINA falls back to the legacy renderer. The setting is applied when a player is created.
     static let useGpuNextRenderer = Key("useGpuNextRenderer")
+    /// Render video with mpv's `gpu-next` renderer on Vulkan (MoltenVK) instead of OpenGL.
+    ///
+    /// Vulkan has compute shaders, which OpenGL on macOS lacks, so user shaders such as ArtCNN can run. If Vulkan or the
+    /// libmpv Vulkan render API is not usable then IINA falls back to OpenGL. The setting is applied when a player is created.
+    static let useVulkanRenderer = Key("useVulkanRenderer")
     static let loadIccProfile = Key("loadIccProfile")
     static let enableHdrSupport = Key("enableHdrSupport")
     static let enableToneMapping = Key("enableToneMapping")
@@ -1155,6 +1160,7 @@ struct Preference {
     .hardwareDecoder: HardwareDecoderOption.auto.rawValue,
     .forceDedicatedGPU: false,
     .useGpuNextRenderer: true,
+    .useVulkanRenderer: false,
     .loadIccProfile: true,
     .enableHdrSupport: true,
     .enableToneMapping: true,
@@ -1528,6 +1534,7 @@ struct Preference {
            .trackAllFilesInRecentOpenMenu,
            .useAppleRemote,
            .useGpuNextRenderer,
+           .useVulkanRenderer,
            .useLegacyFullScreen,
            .useLiquidGlassOSC,
            .useLiquidGlassOSD,
