@@ -106,6 +106,8 @@ final class VulkanViewLayer: CAMetalLayer, VideoLayer {
         let visible = window.occlusionState.contains(.visible)
         guard visible != isWindowVisible else { return }
         isWindowVisible = visible
+        Logger.log("Window \(visible ? "visible" : "not visible"): \(visible ? "presenting" : "skipping") frames",
+                   level: .debug, subsystem: subsystem)
         if visible { update(force: true) }
       }
   }
@@ -166,19 +168,30 @@ final class VulkanViewLayer: CAMetalLayer, VideoLayer {
       forceDraw = false
 
       let size = pixelSize
-      guard isWindowVisible, size.width >= 1, size.height >= 1 else {
-        // Let mpv drop the frame without drawing, so that playback continues.
-        if hasNewFrame { skipRender(renderContext) }
-        return
-      }
-
+      let hasSize = size.width >= 1 && size.height >= 1
       let handler = snapshotLock.withLock { () -> ((NSImage?) -> Void)? in
         let handler = pendingSnapshotHandler
         pendingSnapshotHandler = nil
         return handler
       }
+      guard hasSize else {
+        handler?(nil)
+        if hasNewFrame { skipRender(renderContext) }
+        return
+      }
       let snapshot: ((CGImage?) -> Void)? = handler.map { handler in
         { image in handler(image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }) }
+      }
+      guard isWindowVisible else {
+        // A capture (for Live Text) must not wait until the window is visible again, so render the frame without
+        // presenting it. Otherwise let mpv drop the frame without drawing, so that playback continues.
+        if let snapshot {
+          _ = vulkan.renderFrame(renderContext, layer: nil, width: Int32(size.width), height: Int32(size.height),
+                                 snapshot: snapshot)
+        } else if hasNewFrame {
+          skipRender(renderContext)
+        }
+        return
       }
       _ = vulkan.renderFrame(renderContext, layer: self, width: Int32(size.width), height: Int32(size.height),
                          snapshot: snapshot)
