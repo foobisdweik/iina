@@ -1,0 +1,14 @@
+{
+  "name": "Upscaler",
+  "identifier": "io.github.iphoobis.iina-upscaler",
+  "version": "0.1.0",
+  "description": "Picks an mpv upscaling shader chain for each video's resolution. Needs the IINA fork with the Vulkan renderer.",
+  "author": {
+    "name": "Firas Dweik"
+  },
+  "entry": "dist/index.js",
+  "permissions": ["show-osd", "file-system"],
+  "preferenceDefaults": {
+    "enabled": true
+  }
+}

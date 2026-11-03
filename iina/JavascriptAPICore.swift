@@ -336,6 +336,10 @@ fileprivate class StatusAPI: JavascriptAPI, CoreSubAPIExportable {
       return player!.info.currentURL?.absoluteString.removingPercentEncoding ?? NSNull()
     case "title":
       return player!.getMediaTitle(withExtension: false)
+    case "renderAPI":
+      // The mpv render API in use: "vulkan", "opengl-next" or "opengl", or null before rendering starts. Only the
+      // Vulkan render API can run compute shaders, so plugins that set user shaders need to know it.
+      return player!.mpv.renderAPI ?? NSNull()
     default:
       return nil
     }

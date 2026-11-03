@@ -1,0 +1,12 @@
+{
+  "name": "iina-upscaler",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "shaders": "bun scripts/fetch-shaders.ts",
+    "bundle": "bun build src/index.ts --outfile dist/index.js --target browser --format iife",
+    "build": "bun run shaders && bun run bundle",
+    "package": "bun run build && bun scripts/package.ts",
+    "test": "bun test"
+  }
+}

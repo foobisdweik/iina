@@ -94,6 +94,10 @@ class JavascriptAPI: NSObject {
       return (expandPath(path, byReplacing: "tmp", with: plugin.tmpURL), true)
     } else if path.hasPrefix("@data/") {
       return (expandPath(path, byReplacing: "data", with: plugin.dataURL), true)
+    } else if path.hasPrefix("@plugin/") {
+      // The plugin's own installed folder, so a plugin can pass its bundled files (for example mpv shaders) to mpv by
+      // absolute path. It is not private storage: `local` is false, so the file API cannot write or delete there.
+      return (expandPath(path, byReplacing: "plugin", with: plugin.root), false)
     }
 
     let trackType: MPVTrack.TrackType? =
